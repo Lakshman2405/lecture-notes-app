@@ -30,22 +30,21 @@ GEMINI_MODEL = genai.GenerativeModel('gemini-1.5-flash')
 def transcribe_audio(audio_buffer):
     """
     Transcribes audio using Hugging Face's Whisper API.
-    Uses the VETTED 'files' parameter structure for reliable upload.
+    Sends raw audio bytes with a manually specified Content-Type header.
     """
     # 1. Reset the buffer and read the raw bytes.
     audio_buffer.seek(0)
     audio_bytes = audio_buffer.read()
     
-    # 2. **VETTED FIX:** Structure the 'files' dictionary explicitly as:
-    # {field_name: (filename, data_bytes, mimetype)}
-    files = {
-        'audio': (audio_buffer.name, audio_bytes, audio_buffer.type)
+    # 2. FINAL VETTED FIX: Send raw bytes using 'data' and set 'Content-Type' header manually.
+    headers = {
+        "Authorization": f"Bearer {HF_API_TOKEN}",
+        # Set Content-Type based on the uploaded file's type (e.g., audio/mpeg or audio/m4a)
+        "Content-Type": audio_buffer.type 
     }
     
-    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-    
-    # Send the request using the 'files' parameter
-    response = requests.post(HF_API_URL, headers=headers, files=files)
+    # Send the raw bytes using the 'data' parameter
+    response = requests.post(HF_API_URL, headers=headers, data=audio_bytes)
     result = response.json()
 
     # Handle the case where the model is loading
@@ -55,8 +54,8 @@ def transcribe_audio(audio_buffer):
         
         time.sleep(wait_time + 2) 
         
-        # Retry the request with the same files structure
-        response = requests.post(HF_API_URL, headers=headers, files=files)
+        # Retry the request with the same structure
+        response = requests.post(HF_API_URL, headers=headers, data=audio_bytes)
         result = response.json()
 
     # Final check for success or failure
@@ -81,8 +80,8 @@ def generate_study_notes(transcript):
     Generates structured study notes (Summary, Quiz, Flashcards) 
     from a transcript using the Google Gemini API.
     """
-    # The 'prompt' is a multi-line string variable, not a comment.
-    prompt = f""" Based on the following lecture transcript, generate a comprehensive set of study materials.
+    prompt = f"""
+    Based on the following lecture transcript, generate a comprehensive set of study materials.
     Structure your response using Markdown with these three distinct sections:
     1.  **Summary:** A concise, bulleted summary of the key points and main topics. Use Markdown lists.
     2.  **Quiz:** 3 multiple-choice questions to test understanding, with the correct answer clearly indicated (e.g., in bold).
@@ -93,10 +92,7 @@ def generate_study_notes(transcript):
     {transcript}
     ---
     """
-
-
-
-
+    
     try:
         response = GEMINI_MODEL.generate_content(prompt)
         return response.text
