@@ -25,22 +25,21 @@ genai.configure(api_key=GOOGLE_API_KEY)
 
 # --- API CONFIGURATION ---
 HF_API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
-GEMINI_MODEL = genai.GenerativeModel('gemini-1.5-flash')
+GEMINI_MODEL = genai.GenerativeModel('gemini-2.5-flash')
 
 def transcribe_audio(audio_buffer):
     """
     Transcribes audio using Hugging Face's Whisper API.
-    Sends raw audio bytes with a manually specified Content-Type header.
+    Sends raw audio bytes with a manually specified Content-Type header (most reliable method).
     """
     # 1. Reset the buffer and read the raw bytes.
     audio_buffer.seek(0)
     audio_bytes = audio_buffer.read()
     
-    # 2. FINAL VETTED FIX: Send raw bytes using 'data' and set 'Content-Type' header manually.
+    # 2. VETTED FIX: Send raw bytes using 'data' and set 'Content-Type' header manually.
     headers = {
         "Authorization": f"Bearer {HF_API_TOKEN}",
-        # Set Content-Type based on the uploaded file's type (e.g., audio/mpeg or audio/m4a)
-        "Content-Type": audio_buffer.type 
+        "Content-Type": audio_buffer.type # Use the file's detected mime type
     }
     
     # Send the raw bytes using the 'data' parameter
@@ -54,15 +53,16 @@ def transcribe_audio(audio_buffer):
         
         time.sleep(wait_time + 2) 
         
-        # Retry the request with the same structure
+        # Retry the request
         response = requests.post(HF_API_URL, headers=headers, data=audio_bytes)
         result = response.json()
 
     # Final check for success or failure
     if isinstance(result, dict) and "text" in result:
+        # Return the text, even if it's whitespace.
         return result["text"]
     else:
-        # Improved error handling for common API failure responses
+        # Improved error handling for API failure responses (only shows if API fails, not if content is silent)
         error_message = ""
         if isinstance(result, dict) and 'error' in result:
             error_message = result['error']
@@ -71,8 +71,8 @@ def transcribe_audio(audio_buffer):
         else:
             error_message = "Could not parse API response."
 
-        st.error(f"Transcription Error (API Response): {error_message}")
-        st.caption("If this error persists, ensure your Hugging Face API Token is active and the file format is supported.")
+        st.error(f"Transcription API Error: {error_message}")
+        st.caption("Ensure your Hugging Face API Token is active.")
         return None
 
 def generate_study_notes(transcript):
@@ -80,6 +80,15 @@ def generate_study_notes(transcript):
     Generates structured study notes (Summary, Quiz, Flashcards) 
     from a transcript using the Google Gemini API.
     """
+    # SOLUTION: Instruct the model on how to handle empty transcription gracefully.
+    empty_prompt_message = """
+    **No Content Detected**
+    The audio transcription returned empty or contained only noise, meaning no meaningful spoken words were detected.
+    Please try a different audio file with clear speech.
+    """
+    if not transcript or not transcript.strip():
+        return empty_prompt_message
+
     prompt = f"""
     Based on the following lecture transcript, generate a comprehensive set of study materials.
     Structure your response using Markdown with these three distinct sections:
@@ -123,29 +132,34 @@ if uploaded_file is not None:
             with st.spinner('Transcribing audio... This can take a few moments depending on file size.'):
                 transcript_text = transcribe_audio(uploaded_file)
             
-            # 🌟 FIX: Check if the transcribed text is not just whitespace before proceeding
-            if transcript_text and transcript_text.strip():
+            # Transcription is complete (unless a critical API error occurred)
+            if transcript_text is not None: 
                 st.success("Transcription complete!")
                 
                 # Step 2: Generate Study Materials
                 with st.spinner('Generating your study guide with Gemini...'):
+                    # The function generate_study_notes now handles empty transcription gracefully
                     study_notes = generate_study_notes(transcript_text)
                 
-                if study_notes and study_notes.strip():
-                    st.success("Study materials generated successfully!")
+                # We always display the output, whether it's the notes or the "No Content" message
+                if study_notes:
+                    # Determine success state for the user interface
+                    is_content_available = study_notes.strip() != "**No Content Detected**"
                     
+                    if is_content_available:
+                        st.success("Study materials generated successfully!")
+                    else:
+                        st.info("Study materials generated (showing 'No Content Detected').")
+
                     # Display results in two columns
                     col1, col2 = st.columns(2)
                     
                     with col1:
                         st.subheader("Transcript")
-                        st.text_area("Full Lecture Transcript", transcript_text, height=450)
+                        # If transcript_text is empty, this will display nothing, which is correct
+                        st.text_area("Full Lecture Transcript", transcript_text.strip(), height=450)
                         
                     with col2:
                         st.subheader("AI-Generated Study Materials")
-                        # Use st.markdown to properly render the structured output from Gemini
+                        # This will display either the actual notes or the polite message
                         st.markdown(study_notes)
-                else:
-                    st.warning("AI summarization returned empty or whitespace-only notes. Please check the content of the transcript.")
-            else:
-                st.error("Transcription failed to return meaningful text. The audio may be silent or contain only background noise.")
