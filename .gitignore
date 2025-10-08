@@ -20,4 +20,4 @@ secrets.toml
 
 # --- Utility Executables ---
 # Ignore the external video utility executable
-ffmpeg.exe
+*.exe

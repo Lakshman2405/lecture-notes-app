@@ -21,7 +21,7 @@ def download_audio_from_youtube():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             print("Downloading and converting audio...")
             ydl.download([video_url])
-        print("\nSuccess! Your MP3 file is saved in the YouTube Downloader folder.")
+        print("\nSuccess! Your MP3 file is saved in the Lecture notes project folder.")
     except Exception as e:
         print(f"\nAn error occurred: {e}")
 
