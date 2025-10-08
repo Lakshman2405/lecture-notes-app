@@ -3,6 +3,7 @@ import requests
 import google.generativeai as genai
 from io import BytesIO
 import time
+import json
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Free Notes Generator", page_icon="📝")
@@ -22,22 +23,30 @@ model = genai.GenerativeModel('gemini-pro')
 
 def transcribe_audio(audio_buffer):
     """
-    Sends audio to Hugging Face API and handles the model's loading state.
+    Sends audio to Hugging Face API, handles model loading, and safely decodes JSON.
     """
-    # Initial request
     response = requests.post(HF_API_URL, headers=headers, data=audio_buffer)
-    result = response.json()
+    
+    # Try to decode the JSON response
+    try:
+        result = response.json()
+    except json.JSONDecodeError:
+        st.error(f"Failed to decode response from Hugging Face. Raw response: {response.text}")
+        return None
 
     # Handle the case where the model is loading
     if "error" in result and "is currently loading" in result["error"]:
-        # Wait for the estimated time and retry
         wait_time = result.get("estimated_time", 20)
         st.info(f"Model is loading, please wait. Retrying in {wait_time:.0f} seconds...")
         time.sleep(wait_time)
         
         # Retry the request
         response = requests.post(HF_API_URL, headers=headers, data=audio_buffer)
-        result = response.json()
+        try:
+            result = response.json()
+        except json.JSONDecodeError:
+            st.error(f"Failed to decode response on retry. Raw response: {response.text}")
+            return None
 
     # Final check for text or error
     if "text" in result:
