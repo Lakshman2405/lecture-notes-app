@@ -17,6 +17,7 @@ try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 except Exception:
     st.error("API keys not found in Streamlit secrets. Please ensure .streamlit/secrets.toml is configured.")
+    # WARNING: These are placeholders. The app will only work with real keys in secrets.toml.
     HF_API_TOKEN = "hf_YOUR_HUGGING_FACE_TOKEN"  
     GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY"       
 
@@ -29,14 +30,16 @@ GEMINI_MODEL = genai.GenerativeModel('gemini-1.5-flash')
 def transcribe_audio(audio_buffer):
     """
     Transcribes audio using Hugging Face's Whisper API.
-    Uses the 'files' parameter to correctly encode the audio for the API, 
-    fixing the "Content type None" error.
+    Uses the VETTED 'files' parameter structure for reliable upload.
     """
+    # 1. Reset the buffer and read the raw bytes.
     audio_buffer.seek(0)
+    audio_bytes = audio_buffer.read()
     
-    # 🌟 CRITICAL FIX: Use the 'files' parameter for correct multipart/form-data encoding.
+    # 2. **VETTED FIX:** Structure the 'files' dictionary explicitly as:
+    # {field_name: (filename, data_bytes, mimetype)}
     files = {
-        'file': (audio_buffer.name, audio_buffer.read(), audio_buffer.type)
+        'audio': (audio_buffer.name, audio_bytes, audio_buffer.type)
     }
     
     headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
@@ -45,23 +48,32 @@ def transcribe_audio(audio_buffer):
     response = requests.post(HF_API_URL, headers=headers, files=files)
     result = response.json()
 
-    # Handle the case where the model is loading (common with free tier APIs)
-    if "error" in result and "is currently loading" in result["error"]:
+    # Handle the case where the model is loading
+    if isinstance(result, dict) and "error" in result and "is currently loading" in result["error"]:
         wait_time = result.get("estimated_time", 25)
         st.info(f"The transcription model is loading, please wait. Retrying in {wait_time:.0f} seconds...")
         
-        # Wait time + 2 seconds buffer
         time.sleep(wait_time + 2) 
         
-        # Retry the request
-        response = requests.post(HF_API_URL, headers=headers, files=files) # Retry with 'files'
+        # Retry the request with the same files structure
+        response = requests.post(HF_API_URL, headers=headers, files=files)
         result = response.json()
 
-    if "text" in result:
+    # Final check for success or failure
+    if isinstance(result, dict) and "text" in result:
         return result["text"]
     else:
-        st.error(f"Transcription Error (API Response): {result.get('error', 'Could not process audio.')}")
-        st.caption("Double-check your Hugging Face API Token and the file size/format.")
+        # Improved error handling for common API failure responses
+        error_message = ""
+        if isinstance(result, dict) and 'error' in result:
+            error_message = result['error']
+        elif isinstance(result, list) and len(result) > 0 and 'error' in result[0]:
+            error_message = result[0]['error']
+        else:
+            error_message = "Could not parse API response."
+
+        st.error(f"Transcription Error (API Response): {error_message}")
+        st.caption("If this error persists, ensure your Hugging Face API Token is active and the file format is supported.")
         return None
 
 def generate_study_notes(transcript):
@@ -69,8 +81,8 @@ def generate_study_notes(transcript):
     Generates structured study notes (Summary, Quiz, Flashcards) 
     from a transcript using the Google Gemini API.
     """
-    prompt = f"""
-    Based on the following lecture transcript, generate a comprehensive set of study materials.
+    # The 'prompt' is a multi-line string variable, not a comment.
+    prompt = f""" Based on the following lecture transcript, generate a comprehensive set of study materials.
     Structure your response using Markdown with these three distinct sections:
     1.  **Summary:** A concise, bulleted summary of the key points and main topics. Use Markdown lists.
     2.  **Quiz:** 3 multiple-choice questions to test understanding, with the correct answer clearly indicated (e.g., in bold).
@@ -81,7 +93,10 @@ def generate_study_notes(transcript):
     {transcript}
     ---
     """
-    
+
+
+
+
     try:
         response = GEMINI_MODEL.generate_content(prompt)
         return response.text
