@@ -123,14 +123,15 @@ if uploaded_file is not None:
             with st.spinner('Transcribing audio... This can take a few moments depending on file size.'):
                 transcript_text = transcribe_audio(uploaded_file)
             
-            if transcript_text:
+            # 🌟 FIX: Check if the transcribed text is not just whitespace before proceeding
+            if transcript_text and transcript_text.strip():
                 st.success("Transcription complete!")
                 
                 # Step 2: Generate Study Materials
                 with st.spinner('Generating your study guide with Gemini...'):
                     study_notes = generate_study_notes(transcript_text)
                 
-                if study_notes:
+                if study_notes and study_notes.strip():
                     st.success("Study materials generated successfully!")
                     
                     # Display results in two columns
@@ -144,3 +145,7 @@ if uploaded_file is not None:
                         st.subheader("AI-Generated Study Materials")
                         # Use st.markdown to properly render the structured output from Gemini
                         st.markdown(study_notes)
+                else:
+                    st.warning("AI summarization returned empty or whitespace-only notes. Please check the content of the transcript.")
+            else:
+                st.error("Transcription failed to return meaningful text. The audio may be silent or contain only background noise.")
