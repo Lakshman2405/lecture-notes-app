@@ -1,3 +1,5 @@
 streamlit
-openai
+huggingface_hub
+requests
+google-generativeai
 yt-dlp

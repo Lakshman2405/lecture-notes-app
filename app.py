@@ -1,115 +1,91 @@
 import streamlit as st
-import openai
+import requests
+import google.generativeai as genai
 import yt_dlp
 from io import BytesIO
-import requests
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="Notes Generator", page_icon="📝")
+st.set_page_config(page_title="Free Notes Generator", page_icon="📝")
 
 # --- API KEY SETUP ---
 try:
-    openai.api_key = st.secrets["OPENAI_API_KEY"]
-except:
-    st.warning("API key not found. Please set it in Streamlit secrets.")
+    HF_API_TOKEN = st.secrets["HF_API_TOKEN"]
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=GOOGLE_API_KEY)
+except Exception as e:
+    st.warning("API key not found. Please set your Hugging Face and Google API keys in Streamlit secrets.")
 
-# --- APP TITLE AND DESCRIPTION ---
-st.title("AI-Powered Notes Generator 📝")
+# --- HUGGING FACE API FUNCTION (FOR TRANSCRIPTION) ---
+HF_API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
+headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+
+def transcribe_audio(audio_buffer):
+    response = requests.post(HF_API_URL, headers=headers, data=audio_buffer)
+    result = response.json()
+    if "text" in result:
+        return result["text"]
+    else:
+        st.error(f"Transcription Error: {result.get('error', 'Unknown error')}")
+        return None
+
+# --- GOOGLE GEMINI API FUNCTION (FOR SUMMARIZATION) ---
+model = genai.GenerativeModel('gemini-pro')
+
+def summarize_text(transcript):
+    prompt = f"Generate concise, well-organized study notes from the following transcript: {transcript}"
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        st.error(f"Summarization Error: {e}")
+        return None
+
+# --- MAIN APP LOGIC ---
+st.title("AI-Powered Notes Generator (Free Version) 📝")
 st.markdown("Get a transcript and study notes from a YouTube video or an audio file.")
 
-# --- TABS FOR INPUT METHOD ---
 tab1, tab2 = st.tabs(["▶️ YouTube URL", "📁 File Upload"])
 
-# --- YOUTUBE URL TAB ---
+def process_audio(audio_buffer):
+    with st.spinner('Transcribing audio...'):
+        transcript_text = transcribe_audio(audio_buffer)
+    
+    if transcript_text:
+        st.subheader("Transcript")
+        st.text_area("Full Transcript", transcript_text, height=200)
+        
+        with st.spinner('Generating study notes...'):
+            study_notes = summarize_text(transcript_text)
+        
+        if study_notes:
+            st.subheader("Study Notes")
+            st.markdown(study_notes)
+
+# YouTube URL Tab
 with tab1:
     st.header("Generate Notes from a YouTube Video")
     youtube_url = st.text_input("Enter YouTube URL:")
 
     if youtube_url:
-        with st.spinner('Processing your video... This might take a moment.'):
+        with st.spinner('Downloading audio from YouTube...'):
             try:
-                # --- Get Audio from YouTube using yt-dlp ---
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '192',
-                    }],
-                    'outtmpl': '%(title)s.%(ext)s'
-                }
-
+                ydl_opts = {'format': 'bestaudio/best', 'outtmpl': '%(title)s.%(ext)s'}
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info_dict = ydl.extract_info(youtube_url, download=False)
                     video_title = info_dict.get('title', 'Untitled Video')
-                    # Find the best audio URL from the formats
-                    audio_url = None
-                    for f in info_dict['formats']:
-                        if f['acodec'] != 'none' and f['vcodec'] == 'none':
-                            audio_url = f['url']
-                            break
-                    if not audio_url:
-                         # Fallback if no audio-only stream is found
-                         audio_url = info_dict['url']
-
-
-                # Download the audio content from the URL into memory
+                    audio_url = info_dict['url']
+                
                 response = requests.get(audio_url)
                 buffer = BytesIO(response.content)
-                buffer.name = 'audio.mp3'  # Name the buffer for the API
-
                 st.success(f"Successfully loaded audio from: '{video_title}'")
-                
-                # --- Transcription ---
-                st.subheader("Transcript")
-                transcript = openai.audio.transcriptions.create(
-                    model="whisper-1", 
-                    file=buffer
-                )
-                st.text_area("Full Transcript", transcript.text, height=200, key="yt_transcript")
-
-                # --- Summarization ---
-                st.subheader("Study Notes")
-                prompt = f"Generate concise, well-organized study notes from the following transcript: {transcript.text}"
-                response = openai.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant that creates study notes from transcripts."},
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                st.markdown(response.choices[0].message.content, key="yt_notes")
-
+                process_audio(buffer)
             except Exception as e:
-                st.error(f"An error occurred: {e}")
+                st.error(f"Error downloading from YouTube: {e}")
 
-# --- FILE UPLOAD TAB ---
+# File Upload Tab
 with tab2:
     st.header("Generate Notes from an Audio File")
-    uploaded_file = st.file_uploader("Choose an audio file (.mp3, .m4a, .wav)...", type=['mp3', 'm4a', 'wav'])
+    uploaded_file = st.file_uploader("Choose an audio file...", type=['mp3', 'm4a', 'wav'])
 
     if uploaded_file is not None:
-        with st.spinner('Processing your audio file... This might take a moment.'):
-            try:
-                # --- Transcription ---
-                st.subheader("Transcript")
-                transcript = openai.audio.transcriptions.create(
-                    model="whisper-1", 
-                    file=uploaded_file
-                )
-                st.text_area("Full Transcript", transcript.text, height=200, key="file_transcript")
-
-                # --- Summarization ---
-                st.subheader("Study Notes")
-                prompt = f"Generate concise, well-organized study notes from the following transcript: {transcript.text}"
-                response = openai.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant that creates study notes from transcripts."},
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                st.markdown(response.choices[0].message.content, key="file_notes")
-
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+        process_audio(uploaded_file)
