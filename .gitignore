@@ -1,0 +1,23 @@
+# --- Virtual Environment and Build Artifacts ---
+/venv
+__pycache__
+*.pyc
+
+# --- Streamlit and API Secrets ---
+# CRITICAL: Ignores the folder where Streamlit stores local secrets
+/.streamlit/
+# Ignores local secrets files, preventing API keys from going to GitHub
+secrets.toml 
+.env
+
+# --- Large/Temporary Files ---
+# Ignores large audio/media files generated or downloaded
+*.mp3
+*.wav
+*.m4a
+*.webm
+*.ogg
+
+# --- Utility Executables ---
+# Ignore the external video utility executable
+ffmpeg.exe
