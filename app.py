@@ -20,7 +20,7 @@ except Exception as e:
 
 # --- API FUNCTIONS ---
 HF_API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def transcribe_audio(audio_buffer, content_type):
     """
