@@ -1,7 +1,8 @@
 import streamlit as st
 import openai
-from pytube import YouTube
+import yt_dlp
 from io import BytesIO
+import requests
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Notes Generator", page_icon="📝")
@@ -27,17 +28,37 @@ with tab1:
     if youtube_url:
         with st.spinner('Processing your video... This might take a moment.'):
             try:
-                # --- Get Audio from YouTube ---
-                yt = YouTube(youtube_url)
-                audio_stream = yt.streams.filter(only_audio=True).first()
-                
-                # Download audio into an in-memory buffer
-                buffer = BytesIO()
-                audio_stream.stream_to_buffer(buffer)
-                buffer.seek(0)
-                buffer.name = 'audio.mp3' # Name the buffer for the API
-                
-                st.success(f"Successfully loaded audio from: '{yt.title}'")
+                # --- Get Audio from YouTube using yt-dlp ---
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                    'outtmpl': '%(title)s.%(ext)s'
+                }
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info_dict = ydl.extract_info(youtube_url, download=False)
+                    video_title = info_dict.get('title', 'Untitled Video')
+                    # Find the best audio URL from the formats
+                    audio_url = None
+                    for f in info_dict['formats']:
+                        if f['acodec'] != 'none' and f['vcodec'] == 'none':
+                            audio_url = f['url']
+                            break
+                    if not audio_url:
+                         # Fallback if no audio-only stream is found
+                         audio_url = info_dict['url']
+
+
+                # Download the audio content from the URL into memory
+                response = requests.get(audio_url)
+                buffer = BytesIO(response.content)
+                buffer.name = 'audio.mp3'  # Name the buffer for the API
+
+                st.success(f"Successfully loaded audio from: '{video_title}'")
                 
                 # --- Transcription ---
                 st.subheader("Transcript")
