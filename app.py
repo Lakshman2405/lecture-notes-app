@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import google.generativeai as genai
 from io import BytesIO
+import time
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Free Notes Generator", page_icon="📝")
@@ -20,12 +21,29 @@ headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
 model = genai.GenerativeModel('gemini-pro')
 
 def transcribe_audio(audio_buffer):
+    """
+    Sends audio to Hugging Face API and handles the model's loading state.
+    """
+    # Initial request
     response = requests.post(HF_API_URL, headers=headers, data=audio_buffer)
     result = response.json()
+
+    # Handle the case where the model is loading
+    if "error" in result and "is currently loading" in result["error"]:
+        # Wait for the estimated time and retry
+        wait_time = result.get("estimated_time", 20)
+        st.info(f"Model is loading, please wait. Retrying in {wait_time:.0f} seconds...")
+        time.sleep(wait_time)
+        
+        # Retry the request
+        response = requests.post(HF_API_URL, headers=headers, data=audio_buffer)
+        result = response.json()
+
+    # Final check for text or error
     if "text" in result:
         return result["text"]
     else:
-        st.error(f"Transcription Error: {result.get('error', 'Unknown error')}")
+        st.error(f"Transcription Error: {result.get('error', 'Could not process audio.')}")
         return None
 
 def summarize_text(transcript):
