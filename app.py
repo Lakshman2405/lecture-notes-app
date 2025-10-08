@@ -71,16 +71,16 @@ with tab1:
     if youtube_url:
         with st.spinner('Downloading audio from YouTube...'):
             try:
-                # More robust method to download audio directly into a buffer
                 buffer = BytesIO()
                 ydl_opts = {
                     'format': 'bestaudio/best',
-                    'outtmpl': '-', # Directs output to stdout
+                    'outtmpl': '-',
                     'logtostderr': True,
                     'quiet': True,
+                    # --- ADD THIS LINE ---
+                    'http_headers': {'User-Agent': 'Mozilla/5.0'}
                 }
                 
-                # Temporarily redirect stdout to our buffer
                 with contextlib.redirect_stdout(buffer):
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         ydl.download([youtube_url])
