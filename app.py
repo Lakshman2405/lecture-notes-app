@@ -1,49 +1,61 @@
 import streamlit as st
 import openai
+from pytube import YouTube
 import os
+from io import BytesIO
 
 # --- PAGE SETUP ---
-# Set the title and icon of the browser tab
-st.set_page_config(page_title="Lecture-to-Notes", page_icon="🎙️")
+st.set_page_config(page_title="YT-to-Notes", page_icon="▶️")
 
 # --- API KEY SETUP ---
-# Get the API key from Streamlit's secrets management
-# For local testing, you can set this as an environment variable
-# For deployment, you will set this in Streamlit Community Cloud's settings
 try:
     openai.api_key = st.secrets["OPENAI_API_KEY"]
 except:
     st.warning("API key not found. Please set it in Streamlit secrets.")
-    # As a fallback for local development, you might use an environment variable
-    # or hardcode it, but be careful not to expose it in public repositories.
-    # For example: openai.api_key = "YOUR_API_KEY_HERE" (NOT RECOMMENDED FOR PRODUCTION)
 
 # --- APP TITLE AND DESCRIPTION ---
-st.title("AI-Powered Lecture-to-Notes Generator 🎙️➡️📝")
-st.markdown("Upload a lecture audio file, and I'll transcribe and summarize it into study notes for you!")
+st.title("YouTube Video to Study Notes Generator ▶️➡️📝")
+st.markdown("Enter a YouTube video URL, and I'll transcribe and summarize it into study notes for you!")
 
-# --- FILE UPLOADER ---
-uploaded_file = st.file_uploader("Choose an audio file (.mp3, .m4a, .wav)...", type=['mp3', 'm4a', 'wav'])
+# --- URL INPUT ---
+youtube_url = st.text_input("Enter YouTube URL:")
 
-if uploaded_file is not None:
+if youtube_url:
     # Display a spinner while processing
-    with st.spinner('Processing your lecture... This might take a moment.'):
+    with st.spinner('Processing your video... This might take a moment.'):
         try:
-            # --- 1. TRANSCRIPTION ---
-            st.subheader("1. Lecture Transcript")
+            # --- 1. GET AUDIO FROM YOUTUBE ---
+            st.subheader("1. Getting Audio from YouTube")
+            yt = YouTube(youtube_url)
+            
+            # Filter for audio-only streams and get the best one
+            audio_stream = yt.streams.filter(only_audio=True).first()
+            
+            # Download the audio into an in-memory buffer (no file is saved)
+            buffer = BytesIO()
+            audio_stream.stream_to_buffer(buffer)
+            # IMPORTANT: Reset buffer's pointer to the beginning for Whisper API
+            buffer.seek(0)
+            
+            st.success(f"Successfully loaded audio from: '{yt.title}'")
+
+            # --- 2. TRANSCRIPTION ---
+            st.subheader("2. Video Transcript")
+            # We need to give the file a name for the API, even though it's in memory
+            buffer.name = 'audio.mp3' 
+            
             # Call the Whisper API to transcribe the audio
             transcript = openai.audio.transcriptions.create(
                 model="whisper-1", 
-                file=uploaded_file
+                file=buffer
             )
             st.success("Transcription complete!")
             st.text_area("Full Transcript", transcript.text, height=200)
 
-            # --- 2. SUMMARIZATION & NOTE GENERATION ---
-            st.subheader("2. Your Study Notes")
-            # Create a prompt for the GPT model
+            # --- 3. SUMMARIZATION & NOTE GENERATION ---
+            st.subheader("3. Your Study Notes")
             prompt = f"""
-            Based on the following lecture transcript, please generate a set of concise study notes.
+            Based on the following video transcript, please generate a set of concise study notes.
             The notes should be well-organized, highlighting the key concepts, definitions, and important examples mentioned.
             Use bullet points for clarity.
 
@@ -55,7 +67,7 @@ if uploaded_file is not None:
             response = openai.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that creates study notes from lecture transcripts."},
+                    {"role": "system", "content": "You are a helpful assistant that creates study notes from video transcripts."},
                     {"role": "user", "content": prompt}
                 ]
             )
