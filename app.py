@@ -12,15 +12,11 @@ st.set_page_config(
 )
 
 # --- API KEY SETUP ---
-# It is best practice to use st.secrets for deployment.
 try:
-    # Attempt to get keys from Streamlit's secrets management
     HF_API_TOKEN = st.secrets["HF_API_TOKEN"]
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 except Exception:
-    # Fallback for local development if secrets aren't set
     st.error("API keys not found in Streamlit secrets. Please ensure .streamlit/secrets.toml is configured.")
-    # WARNING: These are placeholders. The app will only work with real keys in secrets.toml.
     HF_API_TOKEN = "hf_YOUR_HUGGING_FACE_TOKEN"  
     GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY"       
 
@@ -33,18 +29,20 @@ GEMINI_MODEL = genai.GenerativeModel('gemini-1.5-flash')
 def transcribe_audio(audio_buffer):
     """
     Transcribes audio using Hugging Face's Whisper API.
-    Sends the raw binary data of the audio file to the API.
+    Uses the 'files' parameter to correctly encode the audio for the API, 
+    fixing the "Content type None" error.
     """
-    # CRITICAL FIX: Explicitly reads the file bytes to avoid the "Content type None" error.
-    # Reset the stream position to the start before reading.
     audio_buffer.seek(0)
-    # Read the content into raw bytes
-    audio_bytes = audio_buffer.read()
-
+    
+    # 🌟 CRITICAL FIX: Use the 'files' parameter for correct multipart/form-data encoding.
+    files = {
+        'file': (audio_buffer.name, audio_buffer.read(), audio_buffer.type)
+    }
+    
     headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
     
-    # Send the raw audio bytes as the request data
-    response = requests.post(HF_API_URL, headers=headers, data=audio_bytes)
+    # Send the request using the 'files' parameter
+    response = requests.post(HF_API_URL, headers=headers, files=files)
     result = response.json()
 
     # Handle the case where the model is loading (common with free tier APIs)
@@ -56,7 +54,7 @@ def transcribe_audio(audio_buffer):
         time.sleep(wait_time + 2) 
         
         # Retry the request
-        response = requests.post(HF_API_URL, headers=headers, data=audio_bytes)
+        response = requests.post(HF_API_URL, headers=headers, files=files) # Retry with 'files'
         result = response.json()
 
     if "text" in result:
