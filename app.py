@@ -3,6 +3,8 @@ import requests
 import google.generativeai as genai
 import yt_dlp
 from io import BytesIO
+import sys
+import contextlib
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Free Notes Generator", page_icon="📝")
@@ -47,7 +49,7 @@ st.markdown("Get a transcript and study notes from a YouTube video or an audio f
 tab1, tab2 = st.tabs(["▶️ YouTube URL", "📁 File Upload"])
 
 def process_audio(audio_buffer):
-    with st.spinner('Transcribing audio...'):
+    with st.spinner('Transcribing audio... This might take a moment.'):
         transcript_text = transcribe_audio(audio_buffer)
     
     if transcript_text:
@@ -69,16 +71,24 @@ with tab1:
     if youtube_url:
         with st.spinner('Downloading audio from YouTube...'):
             try:
-                ydl_opts = {'format': 'bestaudio/best', 'outtmpl': '%(title)s.%(ext)s'}
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info_dict = ydl.extract_info(youtube_url, download=False)
-                    video_title = info_dict.get('title', 'Untitled Video')
-                    audio_url = info_dict['url']
+                # More robust method to download audio directly into a buffer
+                buffer = BytesIO()
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': '-', # Directs output to stdout
+                    'logtostderr': True,
+                    'quiet': True,
+                }
                 
-                response = requests.get(audio_url)
-                buffer = BytesIO(response.content)
-                st.success(f"Successfully loaded audio from: '{video_title}'")
+                # Temporarily redirect stdout to our buffer
+                with contextlib.redirect_stdout(buffer):
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([youtube_url])
+                
+                buffer.seek(0)
+                st.success(f"Successfully loaded audio.")
                 process_audio(buffer)
+
             except Exception as e:
                 st.error(f"Error downloading from YouTube: {e}")
 
