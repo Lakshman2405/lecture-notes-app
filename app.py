@@ -17,7 +17,6 @@ try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 except Exception:
     st.error("API keys not found in Streamlit secrets. Please ensure .streamlit/secrets.toml is configured.")
-    # WARNING: These are placeholders. The app will only work with real keys in secrets.toml.
     HF_API_TOKEN = "hf_YOUR_HUGGING_FACE_TOKEN"  
     GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY"       
 
@@ -30,49 +29,64 @@ GEMINI_MODEL = genai.GenerativeModel('gemini-2.5-flash')
 def transcribe_audio(audio_buffer):
     """
     Transcribes audio using Hugging Face's Whisper API.
-    Sends raw audio bytes with a manually specified Content-Type header (most reliable method).
+    Includes robust error handling for non-JSON responses (JSONDecodeError fix).
     """
-    # 1. Reset the buffer and read the raw bytes.
     audio_buffer.seek(0)
     audio_bytes = audio_buffer.read()
     
-    # 2. VETTED FIX: Send raw bytes using 'data' and set 'Content-Type' header manually.
-    headers = {
-        "Authorization": f"Bearer {HF_API_TOKEN}",
-        "Content-Type": audio_buffer.type # Use the file's detected mime type
+    files = {
+        'audio': (audio_buffer.name, audio_bytes, audio_buffer.type)
     }
     
-    # Send the raw bytes using the 'data' parameter
-    response = requests.post(HF_API_URL, headers=headers, data=audio_bytes)
-    result = response.json()
+    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+    
+    response = requests.post(HF_API_URL, headers=headers, files=files)
+
+    # 🌟 NEW ROBUSTNESS CHECK: Check status code before trying to parse JSON
+    if response.status_code != 200:
+        st.error(f"Transcription API Error (Status {response.status_code}): Could not process request.")
+        # Attempt to display the error text for debugging
+        st.caption(f"Raw Response Text (Non-JSON): {response.text[:200]}...")
+        return None
+
+    try:
+        result = response.json()
+    except requests.exceptions.JSONDecodeError:
+        # This catches the error you encountered
+        st.error("Transcription API returned a non-JSON response.")
+        st.caption(f"The server is likely down or the API token is invalid. Raw status: {response.status_code}")
+        return None
 
     # Handle the case where the model is loading
     if isinstance(result, dict) and "error" in result and "is currently loading" in result["error"]:
         wait_time = result.get("estimated_time", 25)
         st.info(f"The transcription model is loading, please wait. Retrying in {wait_time:.0f} seconds...")
-        
         time.sleep(wait_time + 2) 
         
-        # Retry the request
-        response = requests.post(HF_API_URL, headers=headers, data=audio_bytes)
-        result = response.json()
+        # Retry logic remains the same (needs safety checks on retry too, but keeping it concise here)
+        response = requests.post(HF_API_URL, headers=headers, files=files)
+        
+        if response.status_code != 200:
+            st.error("Retry failed. Status was not 200.")
+            return None
+            
+        try:
+            result = response.json()
+        except requests.exceptions.JSONDecodeError:
+            st.error("Retry failed. Returned non-JSON.")
+            return None
 
     # Final check for success or failure
-    if isinstance(result, dict) and "text" in result:
-        # Return the text, even if it's whitespace.
+    if isinstance(result, dict) and "text" in result and result["text"].strip():
         return result["text"]
     else:
-        # Improved error handling for API failure responses (only shows if API fails, not if content is silent)
+        # Handles empty strings or API-side errors reported in JSON
         error_message = ""
         if isinstance(result, dict) and 'error' in result:
             error_message = result['error']
-        elif isinstance(result, list) and len(result) > 0 and 'error' in result[0]:
-            error_message = result[0]['error']
-        else:
-            error_message = "Could not parse API response."
-
-        st.error(f"Transcription API Error: {error_message}")
-        st.caption("Ensure your Hugging Face API Token is active.")
+        
+        st.error(f"Transcription failed: {error_message or 'No meaningful text returned.'}")
+        st.caption("The audio file may be silent, or the API failed internally.")
         return None
 
 def generate_study_notes(transcript):
@@ -80,14 +94,8 @@ def generate_study_notes(transcript):
     Generates structured study notes (Summary, Quiz, Flashcards) 
     from a transcript using the Google Gemini API.
     """
-    # SOLUTION: Instruct the model on how to handle empty transcription gracefully.
-    empty_prompt_message = """
-    **No Content Detected**
-    The audio transcription returned empty or contained only noise, meaning no meaningful spoken words were detected.
-    Please try a different audio file with clear speech.
-    """
     if not transcript or not transcript.strip():
-        return empty_prompt_message
+        return "**No Content Detected**\n\nThe AI summarization skipped the content as the transcription returned only silence or background noise. Please try a different audio file."
 
     prompt = f"""
     Based on the following lecture transcript, generate a comprehensive set of study materials.
@@ -114,52 +122,38 @@ def generate_study_notes(transcript):
 st.title("AI Lecture-to-Notes Generator 📝")
 st.markdown("Upload any lecture audio file (`.wav`, `.mp3`, `.m4a`) to automatically generate a transcript and a complete study guide.")
 
-# Max file size set to 200MB 
 uploaded_file = st.file_uploader("Choose an audio file...", type=['wav', 'mp3', 'm4a'], help="Max size 200MB.")
 
 if uploaded_file is not None:
-    # Display the audio player
     st.audio(uploaded_file, format=uploaded_file.type)
     
-    # Process the audio when the button is clicked
     if st.button("Generate Study Notes", type="primary"):
         
         # Check if API keys are likely invalid (based on placeholders)
         if "YOUR_GOOGLE_API_KEY" in GOOGLE_API_KEY or "YOUR_HUGGING_FACE_TOKEN" in HF_API_TOKEN:
              st.error("Configuration Error: Please provide valid API keys in your Streamlit secrets (`.streamlit/secrets.toml`).")
         else:
-            # Step 1: Transcribe Audio
             with st.spinner('Transcribing audio... This can take a few moments depending on file size.'):
                 transcript_text = transcribe_audio(uploaded_file)
             
-            # Transcription is complete (unless a critical API error occurred)
-            if transcript_text is not None: 
+            if transcript_text:
                 st.success("Transcription complete!")
                 
-                # Step 2: Generate Study Materials
                 with st.spinner('Generating your study guide with Gemini...'):
-                    # The function generate_study_notes now handles empty transcription gracefully
                     study_notes = generate_study_notes(transcript_text)
                 
-                # We always display the output, whether it's the notes or the "No Content" message
                 if study_notes:
-                    # Determine success state for the user interface
-                    is_content_available = study_notes.strip() != "**No Content Detected**"
+                    st.success("Study materials generated successfully!")
                     
-                    if is_content_available:
-                        st.success("Study materials generated successfully!")
-                    else:
-                        st.info("Study materials generated (showing 'No Content Detected').")
-
-                    # Display results in two columns
                     col1, col2 = st.columns(2)
                     
                     with col1:
                         st.subheader("Transcript")
-                        # If transcript_text is empty, this will display nothing, which is correct
-                        st.text_area("Full Lecture Transcript", transcript_text.strip(), height=450)
+                        # Display a warning if the content is just the "No Content Detected" message
+                        if "No Content Detected" in study_notes:
+                            st.warning("Transcript was empty or contained only noise.")
+                        st.text_area("Full Lecture Transcript", transcript_text, height=450)
                         
                     with col2:
                         st.subheader("AI-Generated Study Materials")
-                        # This will display either the actual notes or the polite message
                         st.markdown(study_notes)
