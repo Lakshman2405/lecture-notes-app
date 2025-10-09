@@ -29,20 +29,21 @@ GEMINI_MODEL = genai.GenerativeModel('gemini-2.5-flash')
 def transcribe_audio(audio_buffer):
     """
     Transcribes audio using Hugging Face's Whisper API.
-    Includes robust error handling for non-JSON responses (JSONDecodeError fix).
+    Uses the final, confirmed method: raw bytes with manual Content-Type header.
     """
     audio_buffer.seek(0)
     audio_bytes = audio_buffer.read()
     
-    files = {
-        'audio': (audio_buffer.name, audio_bytes, audio_buffer.type)
+    # 🌟 FINAL FIX: Use raw data + manual Content-Type header (not the 'files=' parameter)
+    headers = {
+        "Authorization": f"Bearer {HF_API_TOKEN}",
+        "Content-Type": audio_buffer.type # Use the file's detected mime type
     }
     
-    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-    
-    response = requests.post(HF_API_URL, headers=headers, files=files)
+    # Send the raw audio bytes as the request data
+    response = requests.post(HF_API_URL, headers=headers, data=audio_bytes)
 
-    # 🌟 NEW ROBUSTNESS CHECK: Check status code before trying to parse JSON
+    # 1. Check status code first
     if response.status_code != 200:
         st.error(f"Transcription API Error (Status {response.status_code}): Could not process request.")
         # Attempt to display the error text for debugging
@@ -52,7 +53,6 @@ def transcribe_audio(audio_buffer):
     try:
         result = response.json()
     except requests.exceptions.JSONDecodeError:
-        # This catches the error you encountered
         st.error("Transcription API returned a non-JSON response.")
         st.caption(f"The server is likely down or the API token is invalid. Raw status: {response.status_code}")
         return None
@@ -63,8 +63,8 @@ def transcribe_audio(audio_buffer):
         st.info(f"The transcription model is loading, please wait. Retrying in {wait_time:.0f} seconds...")
         time.sleep(wait_time + 2) 
         
-        # Retry logic remains the same (needs safety checks on retry too, but keeping it concise here)
-        response = requests.post(HF_API_URL, headers=headers, files=files)
+        # Retry logic
+        response = requests.post(HF_API_URL, headers=headers, data=audio_bytes) # Use data=audio_bytes here too
         
         if response.status_code != 200:
             st.error("Retry failed. Status was not 200.")
