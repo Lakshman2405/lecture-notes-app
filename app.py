@@ -34,7 +34,7 @@ def transcribe_audio(audio_buffer):
     audio_buffer.seek(0)
     audio_bytes = audio_buffer.read()
     
-    # 🌟 FINAL FIX: Use raw data + manual Content-Type header (not the 'files=' parameter)
+    # Use raw data + manual Content-Type header (not the 'files=' parameter)
     headers = {
         "Authorization": f"Bearer {HF_API_TOKEN}",
         "Content-Type": audio_buffer.type # Use the file's detected mime type
